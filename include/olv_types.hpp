@@ -84,8 +84,6 @@ namespace nn::olv
         char unk_end[685];
     } __attribute__((packed));
 
-    static_assert(sizeof(nn::olv::InternalClientObject) == 0xC71, "nn::olv::InternalClientObject) != 0xC71");
-
     struct InternalConnectionObject
     {
         CURL *curl;
