@@ -465,11 +465,11 @@ namespace nn::olv
     bool Internal_InitClientObject()
     {
         strncpy(g_ClientObject.discoveryUrl, g_DiscoveryProtocol, sizeof(g_ClientObject.discoveryUrl));
-        strncat(g_ClientObject.discoveryUrl, g_DiscoveryAddress, sizeof(g_ClientObject.discoveryUrl));
+        strncat(g_ClientObject.discoveryUrl, g_DiscoveryAddress, sizeof(g_ClientObject.discoveryUrl) - 1);
 
         int consoleType = OSGetConsoleType();
 
-        char buffer[64];
+        char buffer[16]; // In the original this 64 bytes, but since it's never that long
         memset(buffer, 0, sizeof(buffer));
 
         const char *OlvType = "DOLV";
@@ -478,7 +478,7 @@ namespace nn::olv
 
         strncpy(buffer, OlvType, sizeof(buffer));
 
-        char version_buffer[32];
+        char version_buffer[16];
         memset(version_buffer, 0, sizeof(version_buffer));
         snprintf(version_buffer, sizeof(version_buffer), "%d.%d.%d", OLV_VERSION_MAJOR, OLV_VERSION_MINOR, OLV_VERSION_PATCH);
 
@@ -810,7 +810,7 @@ namespace nn::olv
         else
         {
             if (additionalUrlParams)
-                snprintf(g_UnkArray1000AEF0, 2048, "%s?%s", g_UnkArray1000A6DC, additionalUrlParams);
+                snprintf(g_UnkArray1000AEF0, sizeof(g_UnkArray1000AEF0), "%s?%s", g_UnkArray1000A6DC, additionalUrlParams);
         }
 
         curl_easy_setopt(g_ConnectionObject.curl, CURLOPT_URL, g_UnkArray1000AEF0);
@@ -920,7 +920,6 @@ namespace nn::olv
             g_ConnectionObject.slist = nullptr;
         }
 
-    LABEL_54:
         curl_multi_remove_handle(curlm, g_ConnectionObject.curl);
         curl_multi_cleanup(curlm);
         curl_easy_cleanup(g_ConnectionObject.curl);
@@ -1060,6 +1059,7 @@ namespace nn::olv
                 return NN_OLV_RESULT_USAGE_CODE(0x6880);
             }
 
+            nn::Result createParamPackResult = NN_OLV_RESULT_SUCCESS;
             if (a4)
             {
                 uint32_t accessKey;
@@ -1074,7 +1074,7 @@ namespace nn::olv
                 }
 
                 uint64_t tid = Internal_GetTitleId();
-                nn::Result createParamPackResult = CreateParameterPack(tid, accessKey, 0);
+                createParamPackResult = CreateParameterPack(tid, accessKey, 0);
                 if (createParamPackResult.IsFailure())
                 {
                     int errCode = nn::olv::GetErrorCode(createParamPackResult);
@@ -1119,6 +1119,7 @@ namespace nn::olv
                             }
                             return initConnRes;
                         }
+                        return createParamPackResult;
                     }
                     else
                     {
@@ -1142,6 +1143,7 @@ namespace nn::olv
                     return NN_OLV_RESULT_USAGE_CODE(0x3380);
                 }
             }
+            return createParamPackResult;
         }
         else
         {

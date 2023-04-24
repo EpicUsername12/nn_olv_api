@@ -46,11 +46,11 @@ void ExceptionHandler(const char *type, OSContext *context)
 
     bool valid = OSIsAddressValid(context->srr0);
     C_UNLESS(!valid, OSGetSymbolName(context->srr0, symbolname, 128));
-    C_UNLESS(valid, memcpy(symbolname, "???", 19));
+    C_UNLESS(valid, strcpy(symbolname, "???"));
 
     valid = OSIsAddressValid(context->lr);
     C_UNLESS(!valid, OSGetSymbolName(context->lr, symbolname2, 128));
-    C_UNLESS(valid, memcpy(symbolname2, "???", 19));
+    C_UNLESS(valid, strcpy(symbolname2, "???"));
 
     char *lrBuffer = (char *)MEMAllocFromDefaultHeap(129);
     snprintf(lrBuffer, 0x80, "0x%08x (%s)", context->lr, symbolname2);
