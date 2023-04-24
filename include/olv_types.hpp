@@ -16,8 +16,17 @@
 
 #include <curl/curl.h>
 
+#ifdef __PRETENDO__
+
 #define OLV_DISCOVERY_PROTOCOL "https://"
 #define OLV_DISCOVERY_ADDRESS "discovery.olv.pretendo.cc/v1/endpoint"
+
+#else
+
+#define OLV_DISCOVERY_PROTOCOL "https://"
+#define OLV_DISCOVERY_ADDRESS "discovery.olv.nintendo.net/v1/endpoint"
+
+#endif
 
 #define OLV_CLIENT_ID "87cd32617f1985439ea608c2746e4610"
 
