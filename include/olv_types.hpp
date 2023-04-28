@@ -87,11 +87,14 @@ namespace nn::olv
     struct InternalClientObject
     {
         char discoveryUrl[0x80];
-        uint32_t unk_0x80;
+        uint32_t has_error;
         char userAgent[0x40];
         char apiEndpoint[0x100];
         char urlFormatBuffer[0x800];
-        char unk_end[685];
+        char unk_end[0x800];
+        char host1[0x800];
+        char host2[0x800];
+        char host3[0x800];
     } __attribute__((packed));
 
     struct InternalCURLHeaderData

@@ -45,7 +45,7 @@ DRC_SPLASH	:=
 CFLAGS	:=	-Wall -O2 -ffunction-sections -Wno-class-memaccess -Wno-format-truncation \
 			$(MACHDEP)
 
-CFLAGS	+=	$(INCLUDE) -D__WIIU__ -D__WUT__
+CFLAGS	+=	$(INCLUDE) -D__WIIU__ -D__WUT__ -D__PRETENDO__
 
 CXXFLAGS	:= $(CFLAGS) -std=gnu++20
 

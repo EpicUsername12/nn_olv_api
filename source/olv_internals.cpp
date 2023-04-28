@@ -1256,6 +1256,47 @@ namespace nn::olv
         return false;
     }
 
+    int Internal_ParseDiscovery(int unk, xml::XMLNode *node, void *userptr)
+    {
+        InternalClientObject *client = (InternalClientObject *)userptr;
+
+        char *tagName = xml::GetTagName();
+        char *tagContent = xml::GetTagContent();
+        uint32_t tagContentLen = xml::GetTagContentLength();
+
+        WHBLogPrintf("%.*s -> %.*s", xml::GetTagNameLength(), tagName, tagContentLen, tagContent);
+
+        if (xml::CompareAgainstTagName(tagName, "has_error"))
+        {
+            client->has_error = Internal_ToInteger(tagContent, tagContentLen);
+            if (client->has_error)
+            {
+                nn::olv::Report::Print(REPORT_TYPE_2048, "Search Home Region has_error is not 0. return:[%d]", client->has_error);
+                return 1;
+            }
+        }
+        else if (!xml::CompareAgainstTagName(tagName, "api_host"))
+        {
+            if (xml::CompareAgainstTagName(tagName, "host"))
+            {
+                uint32_t v9 = tagContentLen + 1;
+                if (tagContentLen + 1 > 0x800)
+                    v9 = 2048;
+                snprintf(client->host3, v9, "%s", tagContent);
+                snprintf(client->host1, 0x800, "%s%s", g_DiscoveryProtocol, client->host3);
+            }
+            else if (xml::CompareAgainstTagName(tagName, "portal_host"))
+            {
+                uint32_t v10 = tagContentLen + 1;
+                if (tagContentLen + 1 > 0x800)
+                    v10 = 2048;
+                snprintf(client->host3, v10, "%s", tagContent);
+                snprintf(client->host2, 2048, "%s%s", g_DiscoveryProtocol, client->host3);
+            }
+        }
+        return 0;
+    }
+
     nn::Result Internal_SearchHomeRegion(bool a1)
     {
         if (!a1 && strnlen(g_UnkArray1005A1E8, 2048))
@@ -1263,7 +1304,7 @@ namespace nn::olv
 
         void *responseBuffer = (void *)Internal_Alloc(0x2800, HEAP_MAIN);
         if (!responseBuffer)
-            return NN_OLV_RESULT_USAGE_CODE(0x3280);
+            return NN_OLV_RESULT_FATAL_CODE(0x3280);
 
         memset(responseBuffer, 0, 0x2800);
         strncpy(g_UnkArray1000A6DC, g_ClientObject.discoveryUrl, 2048);
@@ -1279,6 +1320,17 @@ namespace nn::olv
         }
         else if (Internal_CheckResponse(result, responseBuffer, resSize) && result.IsSuccess())
         {
+            int res = xml::ParseXML((char *)responseBuffer, resSize, Internal_ParseDiscovery, &g_ClientObject);
+            if (res == 1)
+            {
+                nn::olv::Report::Print(REPORT_TYPE_2, "Search Home Region FAILED. xml parse failed.\n");
+                return NN_OLV_RESULT_STATUS_CODE(0x3EA00);
+            }
+            else if (res == 2)
+            {
+                nn::olv::Report::Print(REPORT_TYPE_2, "Search Home Region FAILED. memory allocation error.\n");
+                return NN_OLV_RESULT_FATAL_CODE(0x3280);
+            }
         }
 
         Internal_Free(responseBuffer, HEAP_MAIN);

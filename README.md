@@ -13,11 +13,13 @@ The function `nn::olv::Report::Print` is stubbed in the real executable, but i c
 # What's implemented
 
 - Initialization
+
   - Account
   - Parental Control
   - Zlib
   - Param pack
-  - ~Search Home Region (discovery)~
-    - The request is done, but the XML parsing isn't implemented.
+  - Search Home Region (discovery)
 
-Once **Initialization** is done, we can start to actually implement each exported function!
+- XML parser
+
+Now, we can start implementing each exported functions.
