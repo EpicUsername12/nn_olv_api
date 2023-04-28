@@ -43,6 +43,10 @@ namespace nn::olv
 
     nn::Result GetOlvAccessKey(uint32_t *outAccessKey);
 
+    void Internal_Free(void *ptr, HeapId id);
+    void *Internal_Alloc(size_t size, HeapId id);
+    void Internal_ForceFree(void *ptr);
+
 }
 
 namespace nn::act
@@ -73,5 +77,9 @@ extern "C" int ACPGetOlvAccesskey(uint32_t *);
 extern "C" int OSGetConsoleType(void);
 extern "C" NSSLError NSSLSetClientPKI(NSSLContextHandle handle, int unk);
 extern "C" NSSLError NSSLAddServerPKIGroups(NSSLContextHandle handle, uint32_t flags, int *, int *);
+
+typedef uint64_t ACPNetworkTime;
+extern "C" ACPResult ACPGetNetworkTime(ACPNetworkTime *out, uint8_t *unk);
+extern "C" ACPResult ACPConvertNetworkTimeToOSCalendarTime(ACPNetworkTime time, OSCalendarTime *out);
 
 #endif

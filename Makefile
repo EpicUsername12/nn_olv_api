@@ -42,7 +42,7 @@ DRC_SPLASH	:=
 #-------------------------------------------------------------------------------
 # options for code generation
 #-------------------------------------------------------------------------------
-CFLAGS	:=	-Wall -O1 -ffunction-sections -Wno-class-memaccess -Wno-format-truncation \
+CFLAGS	:=	-Wall -O2 -ffunction-sections -Wno-class-memaccess -Wno-format-truncation \
 			$(MACHDEP)
 
 CFLAGS	+=	$(INCLUDE) -D__WIIU__ -D__WUT__

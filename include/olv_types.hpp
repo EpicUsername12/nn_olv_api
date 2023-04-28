@@ -42,12 +42,22 @@
 
 namespace nn::olv
 {
+
+    enum HeapId : int
+    {
+        HEAP_MAIN = 0,
+        HEAP_ZLIB = 1,
+        HEAP_XML = 2,
+        HEAP_MAX = 3
+    };
+
     enum ReportType : uint32_t
     {
         REPORT_TYPE_2 = (1 << 1),
         REPORT_TYPE_4 = (1 << 2),
         REPORT_TYPE_32 = (1 << 5),
         REPORT_TYPE_128 = (1 << 7),
+        REPORT_TYPE_512 = (1 << 9),
         REPORT_TYPE_2048 = (1 << 11),
         REPORT_TYPE_4096 = (1 << 12),
     };
@@ -84,23 +94,39 @@ namespace nn::olv
         char unk_end[685];
     } __attribute__((packed));
 
-    struct InternalConnectionObject
+    struct InternalCURLHeaderData
     {
-        CURL *curl;
-        curl_slist *slist;
-        TCurlCallback WriteDataCallback;
-        TCurlCallback ReadHeaderCallback;
-        uint32_t isPostRequest;
-        void *WriteData;
-        uint32_t responseBufferSize;
-        uint32_t *responseSize;
-        void **responseBuffer;
-        char CurlHeaderData;
+        char CurlHeaderData; // Marker
         int responseCode;
         uint32_t readSize;
         uint32_t totalReadSize;
         nn::Result result1 = nn::Result(nn::Result::LEVEL_FATAL, nn::Result::RESULT_MODULE_COMMON, 0xfffff);
         nn::Result result2 = nn::Result(nn::Result::LEVEL_FATAL, nn::Result::RESULT_MODULE_COMMON, 0xfffff);
+    };
+
+    struct InternalCURLWriteData
+    {
+        void *WriteData;
+        uint32_t responseBufferSize;
+        uint32_t *outResponseSize;
+        void **responseBuffer;
+    };
+
+    struct InternalCURLData
+    {
+        InternalCURLWriteData write;
+        InternalCURLHeaderData header;
+    };
+
+    struct InternalConnectionObject
+    {
+
+        CURL *curl;
+        curl_slist *slist;
+        TCurlCallback WriteDataCallback;
+        TCurlCallback ReadHeaderCallback;
+        uint32_t isPostRequest;
+        InternalCURLData curlData;
     };
 
     class InitializeParam

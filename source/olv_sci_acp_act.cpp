@@ -31,14 +31,12 @@ uint8_t internal_SCIGetParentalControlSlot(uint8_t slotNo)
         if (result == GetSCIError_c070fa80())
         {
             OSReport("SCI: Account library is not initialized!\n");
-            WHBLogPrintf("SCI: Account library is not initialized!\n");
         }
         else
         {
             if (result == GetSCIError_c070fa80())
             {
                 OSReport("SCI: Invalid pointer detected!\n");
-                WHBLogPrintf("SCI: Invalid pointer detected!\n");
             }
         }
     }
@@ -78,14 +76,12 @@ int _SCIReadSysConfig(const char *key, UCDataType type, uint32_t size, void *out
         else
         {
             OSReport("SCI:ERROR:%s:%d: Couldn't read from system config file (UC Err=%d)\n", "_SCIReadSysConfig", 104, res);
-            WHBLogPrintf("SCI:ERROR:%s:%d: Couldn't read from system config file (UC Err=%d)\n", "_SCIReadSysConfig", 104, res);
             return -1;
         }
     }
     else
     {
         OSReport("SCI:ERROR:%s:%d: Couldn't get UC handle(%d)\n", "_SCIReadSysConfig", 74, ucHandle);
-        WHBLogPrintf("SCI:ERROR:%s:%d: Couldn't get UC handle(%d)\n", "_SCIReadSysConfig", 74, ucHandle);
         UCClose(ucHandle);
         return 0;
     }
@@ -142,7 +138,6 @@ int SCIGetSystemProdArea(uint32_t *outProdArea)
         if (err)
         {
             OSReport("SCI:ERROR:%s:%d: MCP Error loading product information(%d)\n", "SCIGetSystemSettings", 118, err);
-            WHBLogPrintf("SCI:ERROR:%s:%d: MCP Error loading product information(%d)\n", "SCIGetSystemSettings", 118, err);
             MCP_Close(mcpHandle);
             return -1;
         }
@@ -156,7 +151,6 @@ int SCIGetSystemProdArea(uint32_t *outProdArea)
     else
     {
         OSReport("SCI:ERROR:%s:%d: Couldn't get mcp handle(%d)\n", "SCIGetSystemSettings", 109, mcpHandle);
-        WHBLogPrintf("SCI:ERROR:%s:%d: Couldn't get mcp handle(%d)\n", "SCIGetSystemSettings", 109, mcpHandle);
         MCP_Close(mcpHandle);
         return 0;
     }

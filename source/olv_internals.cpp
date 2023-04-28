@@ -2,6 +2,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <whb/log.h>
+#include <coreinit/memdefaultheap.h>
+#include "olv_xml.hpp"
 
 namespace nn::olv
 {
@@ -532,38 +534,59 @@ namespace nn::olv
         }
     }
 
-    size_t Internal_CurlWriteDataCb(char *ptr, uint32_t size, uint32_t nmemb, void *userdata)
+    size_t Internal_CurlWriteDataCb(char *ptr, uint32_t size, uint32_t nmemb, void *pUserdata)
     {
-        int v5;       // r12
-        int v7;       // r31
-        int v8;       // r7
-        int v9;       // r6
-        uint32_t v10; // r5
+        InternalCURLWriteData *userdata = (InternalCURLWriteData *)pUserdata;
 
-        v5 = *(uint32_t *)userdata;
-        if (!*(uint32_t *)userdata)
+        char *writeDataBuffer;   // r12
+        int writeSize_;          // r31
+        uint32_t currentOutSize; // r7
+        int enableSize;          // r6
+        uint32_t writeSize;      // r5
+
+        writeDataBuffer = (char *)userdata->WriteData;
+        if (!userdata->WriteData)
         {
-            v5 = **((uint32_t **)userdata + 3);
-            if (!v5)
+            writeDataBuffer = (char *)*userdata->responseBuffer;
+            if (!writeDataBuffer)
                 return 0;
         }
-        v7 = size * nmemb;
+        writeSize_ = size * nmemb;
         if ((int)(size * nmemb) <= 0)
-            return v7;
-        v8 = **((uint32_t **)userdata + 2);
-        v9 = *((uint32_t *)userdata + 1) - v8;
-        v10 = size * nmemb;
-        if (v9 >= v7)
+            return writeSize_;
+        currentOutSize = *userdata->outResponseSize;
+        enableSize = userdata->responseBufferSize - currentOutSize;
+        writeSize = size * nmemb;
+        if (enableSize >= writeSize_)
         {
-            memcpy((void *)(v5 + v8), ptr, v10);
-            **((uint32_t **)userdata + 2) += v7;
-            return v7;
+            memcpy(&writeDataBuffer[currentOutSize], ptr, writeSize);
+            *userdata->outResponseSize += writeSize_;
+            return writeSize_;
         }
-        nn::olv::Report::Print(REPORT_TYPE_2048, "not enough response buffer size - writeSize:%d enableSize:%d\n", v10, v9);
+        nn::olv::Report::Print(REPORT_TYPE_2048, "not enough response buffer size - writeSize:%d enableSize:%d\n", writeSize, enableSize);
         return 0;
     }
 
-    void *Internal_Alloc(size_t size, uint32_t id)
+    void Internal_ForceFree(void *ptr)
+    {
+        if (ptr)
+            MEMFreeToDefaultHeap(((uint32_t *)ptr - 2));
+    }
+
+    void Internal_Free(void *ptr, HeapId id)
+    {
+        uint32_t *heapEntryHeader = ((uint32_t *)ptr - 2);
+        g_InternalStruct.m_UsedMemorySizes[id] -= heapEntryHeader[0] + 8;
+        if (heapEntryHeader[1] != 0xDEADC0DE)
+        {
+            Report::Print(REPORT_TYPE_2048, "memory corruption detected (magic word is broken: addr is 0x%x)\n", ptr);
+            OSPanic("private/olv_Apii.cpp", 2178, "OLV force stop!");
+        }
+
+        return g_InternalStruct.m_FreeFunc(heapEntryHeader);
+    }
+
+    void *Internal_Alloc(size_t size, HeapId id)
     {
         size_t newSize = size + 8;
         uint32_t *currentUsed = &g_InternalStruct.m_UsedMemorySizes[id];
@@ -579,7 +602,7 @@ namespace nn::olv
                 *currentMax = v10;
 
             *((uint32_t *)ptr + 0) = size;
-            *((uint32_t *)ptr + 1) = size;
+            *((uint32_t *)ptr + 1) = 0xDEADC0DE;
 
             Report::Print(REPORT_TYPE_128, "%d alloc: %d\n", id, size);
             return (void *)((uint32_t *)ptr + 2);
@@ -591,7 +614,7 @@ namespace nn::olv
         return nullptr;
     }
 
-    size_t Internal_CurlReadHeaderCb(char *ptr, uint32_t size, uint32_t nmemb, void *userdata)
+    size_t Internal_CurlReadHeaderCb(char *ptr, uint32_t size, uint32_t nmemb, void *p_userdata)
     {
         int v5;           // r31
         int v6;           // r3
@@ -602,42 +625,50 @@ namespace nn::olv
         unsigned int v15; // r6
         int v16;          // r5
 
+        InternalCURLHeaderData *userdata = (InternalCURLHeaderData *)p_userdata;
+
         v5 = size * nmemb;
         memcpy(g_Unk1000A2DC, ptr, size * nmemb);
+
         g_Unk1000A2DC[v5] = 0;
         v6 = strnlen("Content-Length: ", 17);
-        if (strncmp(g_Unk1000A2DC, "Content-Length: ", v6))
+        if (strncmp(g_Unk1000A2DC, "Content-Length: ", v6) != 0)
             return v5;
+
         long contentLength = strtol(&g_Unk1000A2DC[v6], nullptr, 10);
+
         v10 = contentLength;
-        *((uint32_t *)userdata + 3) = v10;
+        userdata->totalReadSize = v10;
         nn::olv::Report::Print(REPORT_TYPE_4, "content size: %d\n", v10);
-        v10 = *((uint32_t *)userdata + 3);
-        if (g_ConnectionObject.responseBuffer)
+
+        if (g_ConnectionObject.curlData.write.responseBuffer)
         {
-            v11 = Internal_Alloc(v10 + 1, 0);
-            v12 = *((uint32_t *)userdata + 3);
-            *g_ConnectionObject.responseBuffer = v11;
+            v11 = Internal_Alloc(v10 + 1, HEAP_MAIN);
+            v12 = userdata->totalReadSize;
+            *g_ConnectionObject.curlData.write.responseBuffer = v11;
+
             if (!v11)
             {
                 nn::olv::Report::Print(REPORT_TYPE_32, "content size > allocatable size. content size:%d\n", v12);
-                v13 = *((uint32_t *)userdata + 3);
+                v13 = userdata->totalReadSize;
                 if (v13)
-                    *((uint32_t *)userdata + 3) = v13 + 0x2000;
-                *((uint32_t *)userdata + 4) = 0xE1103280;
+                    userdata->totalReadSize = v13 + 0x2000;
+                userdata->result1 = NN_OLV_RESULT_FATAL_CODE(0x3280);
                 return 0;
             }
-            g_ConnectionObject.responseBufferSize = v12;
+
+            g_ConnectionObject.curlData.write.responseBufferSize = v12;
             return v5;
         }
-        v15 = *((uint32_t *)userdata + 2);
+        v15 = userdata->readSize;
         if (v15 >= v10)
             return v5;
         nn::olv::Report::Print(REPORT_TYPE_32, "content size > buffer size. content size:%d  buffer size:%d\n", v10, v15);
-        v16 = *((uint32_t *)userdata + 3);
+
+        v16 = userdata->totalReadSize;
         if (v16)
-            *((uint32_t *)userdata + 3) = v16 + 0x2000;
-        *((uint32_t *)userdata + 4) = 0xE1103280;
+            userdata->totalReadSize = v16 + 0x2000;
+        userdata->result1 = NN_OLV_RESULT_FATAL_CODE(0x3280);
         return 0;
     }
 
@@ -659,8 +690,8 @@ namespace nn::olv
         g_ConnectionObject.isPostRequest = 0;
         g_ConnectionObject.WriteDataCallback = Internal_CurlWriteDataCb;
         g_ConnectionObject.ReadHeaderCallback = Internal_CurlReadHeaderCb;
-        g_ConnectionObject.WriteData = 0;
-        g_ConnectionObject.responseSize = 0;
+        g_ConnectionObject.curlData.write.WriteData = 0;
+        g_ConnectionObject.curlData.write.outResponseSize = 0;
         memset(g_TempUrlArray, 0, 0x200u);
         additionalUrlParams = 0;
         g_SslContext = -1;
@@ -724,11 +755,26 @@ namespace nn::olv
         }
     }
 
-    void Internal_SetupConnectionObject(void *writeData, size_t responseBufferSize, size_t *responseSize)
+    void sub_2006198(int code, nn::Result *outResult)
     {
-        g_ConnectionObject.WriteData = writeData;
-        g_ConnectionObject.responseBufferSize = responseBufferSize;
-        g_ConnectionObject.responseSize = responseSize;
+        if (code)
+        {
+            if (code >= 400)
+                *(uint32_t *)outResult = (((code << 7) - 0x5EE83000) & 0xFFFFF) | 0xA1100000;
+            else
+                *(uint32_t *)outResult = 0x1100080;
+        }
+        else
+        {
+            *(uint32_t *)outResult = 0xA113E980;
+        }
+    }
+
+    void Internal_SetupCURLWriteData(void *writeData, size_t responseBufferSize, size_t *responseSize)
+    {
+        g_ConnectionObject.curlData.write.WriteData = writeData;
+        g_ConnectionObject.curlData.write.responseBufferSize = responseBufferSize;
+        g_ConnectionObject.curlData.write.outResponseSize = responseSize;
     }
 
     void Internal_AppendSList(const char *header)
@@ -755,32 +801,32 @@ namespace nn::olv
 
     nn::Result Internal_DoRequest()
     {
-        if (g_ConnectionObject.WriteData)
+        if (g_ConnectionObject.curlData.write.WriteData)
         {
-            if (!g_ConnectionObject.responseBufferSize)
+            if (!g_ConnectionObject.curlData.write.responseBufferSize)
             {
                 nn::olv::Report::Print(REPORT_TYPE_2048, "Connect failed. responseBufferSize is 0.\n");
                 return NN_OLV_RESULT_USAGE_CODE(0x3400);
             }
         }
-        else if (!g_ConnectionObject.responseBuffer)
+        else if (!g_ConnectionObject.curlData.write.responseBuffer)
         {
             nn::olv::Report::Print(REPORT_TYPE_2048, "Connect failed. responseBuffer not set.\n");
             return NN_OLV_RESULT_USAGE_CODE(0x3400);
         }
-        if (!g_ConnectionObject.responseSize)
+        if (!g_ConnectionObject.curlData.write.outResponseSize)
         {
             nn::olv::Report::Print(REPORT_TYPE_2048, "Connect failed. responseSize not set.\n");
             return NN_OLV_RESULT_USAGE_CODE(0x3400);
         }
 
-        memset(&g_ConnectionObject.CurlHeaderData, 0, 6 * 4);
-        g_ConnectionObject.readSize = g_ConnectionObject.responseBufferSize;
-        g_ConnectionObject.result1 = NN_OLV_RESULT_SUCCESS;
+        memset(&g_ConnectionObject.curlData.header.CurlHeaderData, 0, 6 * 4);
+        g_ConnectionObject.curlData.header.readSize = g_ConnectionObject.curlData.write.responseBufferSize;
+        g_ConnectionObject.curlData.header.result1 = NN_OLV_RESULT_SUCCESS;
 
         Internal_CopyStr(g_UnkArray1000AEF0, g_UnkArray1000A6DC, 2048);
-        if (g_ConnectionObject.responseSize)
-            *g_ConnectionObject.responseSize = 0;
+        if (g_ConnectionObject.curlData.write.outResponseSize)
+            *g_ConnectionObject.curlData.write.outResponseSize = 0;
 
         char userAgent[64];
         nn::olv::GetUserAgent(userAgent, 64);
@@ -788,10 +834,10 @@ namespace nn::olv
         g_ConnectionObject.curl = curl_easy_init();
         curl_easy_setopt(g_ConnectionObject.curl, CURLOPT_FOLLOWLOCATION, 1);
         curl_easy_setopt(g_ConnectionObject.curl, CURLOPT_WRITEFUNCTION, g_ConnectionObject.WriteDataCallback);
-        curl_easy_setopt(g_ConnectionObject.curl, CURLOPT_WRITEDATA, &g_ConnectionObject.WriteData);
+        curl_easy_setopt(g_ConnectionObject.curl, CURLOPT_WRITEDATA, &g_ConnectionObject.curlData.write);
         curl_easy_setopt(g_ConnectionObject.curl, CURLOPT_USERAGENT, userAgent);
         curl_easy_setopt(g_ConnectionObject.curl, CURLOPT_HEADERFUNCTION, g_ConnectionObject.ReadHeaderCallback);
-        curl_easy_setopt(g_ConnectionObject.curl, CURLOPT_HEADERDATA, &g_ConnectionObject.CurlHeaderData);
+        curl_easy_setopt(g_ConnectionObject.curl, CURLOPT_HEADERDATA, &g_ConnectionObject.curlData.header);
         curl_easy_setopt(g_ConnectionObject.curl, CURLOPT_TIMEOUT, 300);
         curl_easy_setopt(g_ConnectionObject.curl, CURLOPT_CONNECTTIMEOUT, 30);
         curl_easy_setopt(g_ConnectionObject.curl, CURLOPT_LOW_SPEED_LIMIT, 1);
@@ -829,7 +875,7 @@ namespace nn::olv
         {
             if (curl_multi_add_handle(curlm, g_ConnectionObject.curl))
             {
-                g_ConnectionObject.result1 = NN_OLV_RESULT_FATAL_CODE(0x3280);
+                g_ConnectionObject.curlData.header.result1 = NN_OLV_RESULT_FATAL_CODE(0x3280);
                 goto LABEL_53;
             }
             curl_multi_setopt(curlm, CURLMOPT_MAXCONNECTS, 4);
@@ -880,21 +926,21 @@ namespace nn::olv
         LABEL_39:
             if (g_ForceCancelFlag)
             {
-                g_ConnectionObject.result1 = NN_OLV_RESULT_STATUS_CODE(0x9680);
+                g_ConnectionObject.curlData.header.result1 = NN_OLV_RESULT_STATUS_CODE(0x9680);
                 Report::Print(REPORT_TYPE_32, "connection cancel.\n");
                 goto LABEL_53;
             }
             if (v7)
             {
                 Report::Print(REPORT_TYPE_32, "ERROR: Error fetching URL: %s reason: %s\n", g_UnkArray1000AEF0, curl_easy_strerror(v7));
-                g_ConnectionObject.result1 = nn::Result(
+                g_ConnectionObject.curlData.header.result1 = nn::Result(
                     nn::Result::LEVEL_STATUS,
                     nn::Result::RESULT_MODULE_NN_OLV,
                     ((v7 << 7) - 0x5EEA2400));
             }
-            else if (g_ConnectionObject.WriteData && g_ConnectionObject.totalReadSize < g_ConnectionObject.readSize)
+            else if (g_ConnectionObject.curlData.write.WriteData && g_ConnectionObject.curlData.header.totalReadSize < g_ConnectionObject.curlData.header.readSize)
             {
-                *(char *)((uint32_t)g_ConnectionObject.WriteData + g_ConnectionObject.totalReadSize) = 0;
+                *(char *)((uint32_t)g_ConnectionObject.curlData.write.WriteData + g_ConnectionObject.curlData.header.totalReadSize) = 0;
             }
 
             long ssl_verifyresult;
@@ -902,16 +948,16 @@ namespace nn::olv
             if (ssl_verifyresult)
                 Report::Print(REPORT_TYPE_2048, "ssl_verifyresult:%d\n", ssl_verifyresult);
 
-            curl_easy_getinfo(g_ConnectionObject.curl, CURLINFO_RESPONSE_CODE, &g_ConnectionObject.responseCode);
-            if (g_ConnectionObject.responseCode != 200)
-                nn::olv::Report::Print(REPORT_TYPE_2048, "response code: %d\n", g_ConnectionObject.responseCode);
+            curl_easy_getinfo(g_ConnectionObject.curl, CURLINFO_RESPONSE_CODE, &g_ConnectionObject.curlData.header.responseCode);
+            if (g_ConnectionObject.curlData.header.responseCode != 200)
+                nn::olv::Report::Print(REPORT_TYPE_2048, "response code: %d\n", g_ConnectionObject.curlData.header.responseCode);
 
-            // TODO: sub_2006198(g_ConnectionObject.responseCode, &g_ConnectionObject.result2);
-            nn::olv::Error::SetServerResponseCode(g_ConnectionObject.responseCode);
+            sub_2006198(g_ConnectionObject.curlData.header.responseCode, &g_ConnectionObject.curlData.header.result2);
+            nn::olv::Error::SetServerResponseCode(g_ConnectionObject.curlData.header.responseCode);
             goto LABEL_53;
         }
 
-        g_ConnectionObject.result1 = NN_OLV_RESULT_STATUS_CODE(0x3280);
+        g_ConnectionObject.curlData.header.result1 = NN_OLV_RESULT_STATUS_CODE(0x3280);
 
     LABEL_53:
         if (slist)
@@ -924,12 +970,290 @@ namespace nn::olv
         curl_multi_cleanup(curlm);
         curl_easy_cleanup(g_ConnectionObject.curl);
         g_ConnectionObject.isPostRequest = 0;
-        g_ConnectionObject.WriteData = 0;
-        g_ConnectionObject.responseBufferSize = 0;
-        g_ConnectionObject.responseBuffer = 0;
+
+        g_ConnectionObject.curlData.write.WriteData = 0;
+        g_ConnectionObject.curlData.write.responseBufferSize = 0;
+        g_ConnectionObject.curlData.write.responseBuffer = 0;
+        g_ConnectionObject.curlData.write.outResponseSize = 0;
+
         additionalUrlParams = 0;
-        g_ConnectionObject.responseSize = 0;
-        return g_ConnectionObject.result1;
+        return g_ConnectionObject.curlData.header.result1;
+    }
+
+    void Internal_CopyCURLHeaderData(InternalCURLHeaderData *out)
+    {
+        memcpy(out, &g_ConnectionObject.curlData.header, sizeof(InternalCURLHeaderData));
+    }
+
+    nn::Result Internal_GetErrorFromHeaderData()
+    {
+        InternalCURLHeaderData header;
+        Internal_CopyCURLHeaderData(&header);
+        return header.result2;
+    }
+
+    unsigned int Internal_StringCopy(char *dest, char *src, unsigned int srcLen, unsigned int destLen)
+    {
+        unsigned int result; // r3
+        unsigned int i;      // r12
+
+        if (!dest || !src || !destLen)
+            return 0;
+        if (srcLen)
+        {
+            if (srcLen > destLen)
+                srcLen = destLen - 1;
+            for (i = 0; i < srcLen; ++i)
+                dest[i] = src[i];
+            dest[i] = 0;
+            result = i;
+        }
+        else
+        {
+            *dest = 0;
+            result = 0;
+        }
+        return result;
+    }
+
+    char *Internal_CopyToLocalBuffer(char *content, uint32_t length)
+    {
+        static char s_LocalBuffer[0x40];
+
+        if (length >= 0x40)
+            return nullptr;
+
+        strncpy(s_LocalBuffer, content, length);
+        s_LocalBuffer[length] = '\0';
+
+        return s_LocalBuffer;
+    }
+
+    int Internal_ToInteger(char *content, uint32_t length)
+    {
+        char *v2;   // r3
+        int result; // r3
+        if (content && (v2 = Internal_CopyToLocalBuffer(content, length)) != 0)
+            result = strtol(v2, 0, 10);
+        else
+            result = 0;
+        return result;
+    }
+
+    void Internal_WriteOliveError(int code, uint32_t *outResult)
+    {
+        if (code)
+        {
+            if (code >= 400)
+                *outResult = (((code << 7) - 0x5EE83000) & 0xFFFFF) | 0xA1100000;
+            else
+                *outResult = 0x1100080;
+        }
+        else
+        {
+            *outResult = 0xA113E980;
+        }
+    }
+
+    bool CalenderStringCheck(char *calendarString)
+    {
+        static char CALENDAR_STRING_VALIDATOR[] = {0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 2, 0, 0, 3, 0, 0, 3, 0, 0, 0};
+
+        char *puVar2;
+        char *puVar3;
+        int iVar4;
+        char uStack_1c[4];
+        char local_18[20];
+        uint8_t bVar1;
+
+        puVar2 = uStack_1c;
+        iVar4 = 5;
+        puVar3 = CALENDAR_STRING_VALIDATOR;
+        do
+        {
+            puVar3 = (char *)((int)puVar3 + 4);
+            puVar2 = puVar2 + 4;
+            *(uint32_t *)puVar2 = *(uint32_t *)puVar3;
+            iVar4 = iVar4 + -1;
+        } while (iVar4 != 0);
+        iVar4 = strnlen(calendarString, 0x14);
+        if (iVar4 != 0x13)
+        {
+            nn::olv::Report::Print(REPORT_TYPE_2048, "CalenderStringCheck FAILED Illegal Length -%d\n", iVar4);
+            return 0;
+        }
+        iVar4 = 0;
+        do
+        {
+            bVar1 = local_18[iVar4];
+            if (bVar1 == 0)
+            {
+                if (9 < *calendarString - '0')
+                    goto LAB_0201f618;
+            }
+            else if (bVar1 == 1)
+            {
+                if (*calendarString != '-')
+                    goto LAB_0201f618;
+            }
+            else if (bVar1 < 3)
+            {
+                if (*calendarString != ' ')
+                    goto LAB_0201f618;
+            }
+            else
+            {
+                if (bVar1 != 3)
+                {
+                    nn::olv::Report::Print(REPORT_TYPE_2048, "CalenderStringCheck FAILED. Illegal Character -[%c]\n", *calendarString);
+                    return 0;
+                }
+                if (*calendarString != ':')
+                {
+                LAB_0201f618:
+                    nn::olv::Report::Print(REPORT_TYPE_2048, "CalenderStringCheck FAILED. Illegal Character -[%c]\n", *calendarString);
+                    return 0;
+                }
+            }
+            iVar4 = iVar4 + 1;
+            calendarString++;
+            if (0x12 < iVar4)
+            {
+                return 1;
+            }
+        } while (true);
+    }
+
+    bool TransformDateStringToCalender(char *dateString, OSCalendarTime *outCalendar)
+    {
+        if (!dateString || !outCalendar || !CalenderStringCheck(dateString))
+            return false;
+
+        memset(outCalendar, 0, sizeof(OSCalendarTime));
+
+        return true;
+    }
+
+    void Internal_ParseOliveErrorEach(char *tagName, char *tagContent, uint32_t tagContentLen, nn::Result *error)
+    {
+
+        WHBLogPrintf("%.*s -> %.*s", xml::GetTagNameLength(), tagName, tagContentLen, tagContent);
+
+        if (xml::CompareAgainstTagName(tagName, "has_error"))
+        {
+            int has_error = Internal_ToInteger(tagContent, tagContentLen);
+            if (has_error == 1)
+            {
+                if (xml::SelectNodeByName("code"))
+                {
+                    char *codeContent = xml::GetTagContent();
+                    uint32_t codeContentLen = xml::GetTagContentLength();
+                    int code = Internal_ToInteger(codeContent, codeContentLen);
+                    Internal_WriteOliveError(code, (uint32_t *)error);
+                }
+                if (xml::SelectNodeByName("error_code"))
+                {
+                    char *codeContent = xml::GetTagContent();
+                    uint32_t codeContentLen = xml::GetTagContentLength();
+                    int code = Internal_ToInteger(codeContent, codeContentLen);
+                    *(uint32_t *)error = (((code << 7) - 0x5EE63C00) & 0xFFFFF) | 0xA1100000;
+                }
+            }
+        }
+        else if (xml::CompareAgainstTagName(tagName, "version"))
+        {
+            int version = Internal_ToInteger(tagContent, tagContentLen);
+            if (version != strtol("1", nullptr, 10))
+            {
+                *(uint32_t *)error = 0xA113E880;
+            }
+        }
+        else if (xml::CompareAgainstTagName(tagName, "expire"))
+        {
+            char buffer[256];
+            Internal_StringCopy(buffer, tagContent, tagContentLen, sizeof(buffer));
+
+            OSCalendarTime expiryCalendarTime;
+            if (TransformDateStringToCalender(buffer, &expiryCalendarTime))
+            {
+                ACPNetworkTime acpNetworkTime;
+                uint8_t unk[4];
+                ACPResult acpStatus = ACPGetNetworkTime(&acpNetworkTime, unk);
+                if (acpStatus)
+                {
+                    nn::olv::Report::Print(REPORT_TYPE_2048, "ACPGetNetworkTime FAILED. acpStatus:%d\n", acpStatus);
+                    *(uint32_t *)error = 0xA1122700;
+                }
+                else
+                {
+                    OSCalendarTime networkCalendarTime;
+                    ACPConvertNetworkTimeToOSCalendarTime(acpNetworkTime, &networkCalendarTime);
+                    if (OSCalendarTimeToTicks(&networkCalendarTime) > OSCalendarTimeToTicks(&expiryCalendarTime))
+                    {
+                        nn::olv::Report::Print(REPORT_TYPE_2048, "EXPIRE PATHED!\n");
+                        *(uint32_t *)error = 0xA113E900;
+                    }
+                }
+            }
+            else
+            {
+                nn::olv::Report::Print(REPORT_TYPE_2048, "TransformDateStringToCalender FAILED [%s]\n", tagContent);
+                *(uint32_t *)error = 0xC1106500;
+            }
+        }
+        else if (xml::CompareAgainstTagName(tagName, "request_language_id"))
+        {
+            int request_language_id = Internal_ToInteger(tagContent, tagContentLen);
+            if (request_language_id != static_ParamPack.languageId)
+            {
+                nn::olv::Report::Print(REPORT_TYPE_2048, "XML Illegal Language Id!!\n");
+                *(uint32_t *)error = 0xA113EC80;
+            }
+        }
+    }
+
+    int Internal_ParseOliveError(int unk, xml::XMLNode *node, void *userptr)
+    {
+
+        nn::Result *userResult = (nn::Result *)userptr;
+        char *tagName = xml::GetTagName();
+        char *tagContent = xml::GetTagContent();
+        uint32_t tagContentLen = xml::GetTagContentLength();
+
+        Internal_ParseOliveErrorEach(tagName, tagContent, tagContentLen, userResult);
+
+        int result = 0;
+        if (*userResult != NN_OLV_RESULT_SUCCESS)
+            result = 3;
+
+        return result;
+    }
+
+    bool Internal_CheckResponse(nn::Result &outResult, void *responseBuffer, uint32_t responseSize)
+    {
+        if (nn::olv::Error::GetServerResponseCode() == 200)
+            return true;
+
+        InternalCURLHeaderData header;
+        Internal_CopyCURLHeaderData(&header);
+
+        int res;
+        if (!header.totalReadSize)
+            goto LABEL_8;
+
+        res = xml::ParseXML((char *)responseBuffer, responseSize, Internal_ParseOliveError, &outResult);
+        if (res == 1)
+            outResult = NN_OLV_RESULT_STATUS_CODE(0x3EA00);
+        else if (res == 2)
+            outResult = NN_OLV_RESULT_FATAL_CODE(0x3280);
+
+        if (outResult.IsSuccess())
+        {
+        LABEL_8:
+            outResult = Internal_GetErrorFromHeaderData();
+        }
+
+        return false;
     }
 
     nn::Result Internal_SearchHomeRegion(bool a1)
@@ -937,7 +1261,7 @@ namespace nn::olv
         if (!a1 && strnlen(g_UnkArray1005A1E8, 2048))
             return nn::Result(nn::Result::LEVEL_SUCCESS, nn::Result::RESULT_MODULE_COMMON, 0);
 
-        void *responseBuffer = (void *)Internal_Alloc(0x2800, 0);
+        void *responseBuffer = (void *)Internal_Alloc(0x2800, HEAP_MAIN);
         if (!responseBuffer)
             return NN_OLV_RESULT_USAGE_CODE(0x3280);
 
@@ -945,20 +1269,20 @@ namespace nn::olv
         strncpy(g_UnkArray1000A6DC, g_ClientObject.discoveryUrl, 2048);
 
         size_t resSize = 0;
-        Internal_SetupConnectionObject(responseBuffer, 0x2800, &resSize);
+        Internal_SetupCURLWriteData(responseBuffer, 0x2800, &resSize);
         Internal_SetupHeaders();
-        nn::Result requestRes = Internal_DoRequest();
-        if (requestRes.IsFailure())
+        nn::Result result = Internal_DoRequest();
+        if (result.IsFailure())
         {
-            int err = nn::olv::GetErrorCode(requestRes);
+            int err = nn::olv::GetErrorCode(result);
             nn::olv::Report::Print(REPORT_TYPE_2, "Search Home Region FAILED. connection failed: errorCode:%d\n", err);
         }
+        else if (Internal_CheckResponse(result, responseBuffer, resSize) && result.IsSuccess())
+        {
+        }
 
-        WHBLogPrintf("Server response code%d\n", nn::olv::Error::GetServerResponseCode());
-
-        // TODO: XML APRSING
-
-        return NN_OLV_RESULT_SUCCESS;
+        Internal_Free(responseBuffer, HEAP_MAIN);
+        return result;
     }
 
     nn::Result Internal_InitConnect(bool a1)

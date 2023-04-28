@@ -20,4 +20,4 @@ The function `nn::olv::Report::Print` is stubbed in the real executable, but i c
   - ~Search Home Region (discovery)~
     - The request is done, but the XML parsing isn't implemented.
 
-Once **Initialization** is done, we can start actually implement each exported function!
+Once **Initialization** is done, we can start to actually implement each exported function!
